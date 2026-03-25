@@ -877,7 +877,7 @@ def build_parser():
     p.add_argument("--course", required=True)
     p.add_argument("--glob", default=None, help="文件匹配模式")
     p.add_argument("--force", action="store_true", help="覆盖已有笔记")
-    p.add_argument("--model", default=None, help="指定 LLM 模型（覆盖 config.yaml）")
+    p.add_argument("--model", default=None, help="指定 LLM 模型，支持 provider/model 格式如 deepseek/deepseek-chat")
     p.set_defaults(handler=cmd_notes)
 
     p = sub.add_parser("all", help="一条龙：下载→转录→笔记", parents=[common])
@@ -888,7 +888,7 @@ def build_parser():
     p.add_argument("--glob", default=None, help="文件匹配模式（过滤转录和笔记阶段）")
     p.add_argument("--url", action="append", default=[])
     p.add_argument("--force", action="store_true", help="覆盖已有笔记")
-    p.add_argument("--model", default=None, help="指定 LLM 模型（覆盖 config.yaml）")
+    p.add_argument("--model", default=None, help="指定 LLM 模型，支持 provider/model 格式如 deepseek/deepseek-chat")
     p.set_defaults(handler=cmd_all)
 
     p = sub.add_parser("status", help="查看处理进度", parents=[common])

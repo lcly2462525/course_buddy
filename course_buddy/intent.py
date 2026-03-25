@@ -232,14 +232,32 @@ def _build_llm_client(llm_cfg: Dict[str, Any]):
     except Exception:
         return None
 
-    api_key = llm_cfg.get("api_key") or os.getenv(llm_cfg.get("api_key_env", "OPENAI_API_KEY"))
+    from .llm_providers import resolve_provider
+
+    model = llm_cfg.get("model", "")
+    resolved = resolve_provider(model, llm_cfg) if model else {"api_key": None, "base_url": None}
+
+    api_key = (
+        resolved.get("api_key")
+        or llm_cfg.get("api_key")
+        or os.getenv(llm_cfg.get("api_key_env", "OPENAI_API_KEY"))
+    )
     if not api_key:
         return None
 
     kwargs: Dict[str, Any] = {"api_key": api_key}
-    base_url = llm_cfg.get("base_url") or os.getenv("OPENAI_BASE_URL")
+    base_url = (
+        resolved.get("base_url")
+        or llm_cfg.get("base_url")
+        or os.getenv("OPENAI_BASE_URL")
+    )
     if base_url:
         kwargs["base_url"] = base_url
+
+    # 更新 llm_cfg 中的 model 为去掉 provider 前缀后的名称
+    if resolved.get("model"):
+        llm_cfg["model"] = resolved["model"]
+
     return OpenAI(**kwargs)
 
 

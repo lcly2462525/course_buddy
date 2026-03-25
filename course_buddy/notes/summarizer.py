@@ -19,21 +19,32 @@ from rich import print as rprint
 
 # --------------- LLM 调用 ---------------
 
+from ..llm_providers import resolve_provider as _resolve_provider
+
+
 def _get_llm_config(llm_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    解析 LLM 配置，优先级：
-    1. llm_cfg 传入的配置
-    2. 环境变量 LLM_API_KEY / OPENAI_API_KEY
+    解析 LLM 配置，自动处理 model 字段中的 provider 前缀。
     """
     cfg = llm_cfg or {}
 
-    # API key：从 config 指定的环境变量名读取，或 fallback
     key_env = cfg.get("api_key_env", "LLM_API_KEY")
-    api_key = os.environ.get(key_env) or os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
-
-    base_url = cfg.get("base_url") or os.environ.get("OPENAI_BASE_URL") or "https://aihubmix.com/v1"
+    default_api_key = os.environ.get(key_env) or os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    default_base_url = cfg.get("base_url") or os.environ.get("OPENAI_BASE_URL") or "https://aihubmix.com/v1"
     model = cfg.get("model", "qwen3-max")
     temperature = cfg.get("temperature", 0.3)
+
+    api_key = default_api_key
+    base_url = default_base_url
+
+    # 检测 model 字段是否含 provider 前缀
+    if model:
+        resolved = _resolve_provider(model, cfg)
+        model = resolved["model"]
+        if resolved["base_url"]:
+            base_url = resolved["base_url"]
+        if resolved["api_key"]:
+            api_key = resolved["api_key"]
 
     return {
         "api_key": api_key,

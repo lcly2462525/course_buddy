@@ -193,8 +193,49 @@ while true; do
         # ============================================================
         print_step 2 "配置 LLM API（用于生成课堂笔记）"
 
-        echo "  笔记生成需要 LLM API。推荐使用 aihubmix（多模型聚合，国内可用）。"
-        echo "  如果你用 OpenAI / 其他兼容 API，修改 Base URL 即可。"
+        echo "  选择你的 LLM 服务商（后续可在 config.yaml 中修改或添加更多 provider）："
+        echo ""
+        echo -e "  ${BOLD}1)${NC} aihubmix     ${DIM}https://aihubmix.com/v1（多模型聚合，国内可用）${NC}"
+        echo -e "  ${BOLD}2)${NC} OpenAI       ${DIM}https://api.openai.com/v1${NC}"
+        echo -e "  ${BOLD}3)${NC} DeepSeek     ${DIM}https://api.deepseek.com/v1${NC}"
+        echo -e "  ${BOLD}4)${NC} SiliconFlow  ${DIM}https://api.siliconflow.cn/v1${NC}"
+        echo -e "  ${BOLD}5)${NC} 通义千问     ${DIM}https://dashscope.aliyuncs.com/compatible-mode/v1${NC}"
+        echo -e "  ${BOLD}6)${NC} 自定义 URL   ${DIM}（学校接口或其他 OpenAI 兼容 API）${NC}"
+        echo ""
+
+        while true; do
+            read -rp "  选择 [1-6, 默认 1]: " provider_choice
+            provider_choice="${provider_choice:-1}"
+
+            if [ "$provider_choice" = "q" ]; then
+                echo -e "\n${DIM}已退出安装向导${NC}"; exit 0
+            fi
+            if [ "$provider_choice" = "b" ]; then
+                print_dim "这已经是第一个配置步骤了"
+                continue
+            fi
+
+            case "$provider_choice" in
+                1) user_base_url="https://aihubmix.com/v1";       default_model="qwen3-max"; break ;;
+                2) user_base_url="https://api.openai.com/v1";     default_model="gpt-4o"; break ;;
+                3) user_base_url="https://api.deepseek.com/v1";   default_model="deepseek-chat"; break ;;
+                4) user_base_url="https://api.siliconflow.cn/v1"; default_model="Qwen/Qwen3-Max"; break ;;
+                5) user_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"; default_model="qwen3-max"; break ;;
+                6)
+                    echo ""
+                    read -rp "  自定义 Base URL: " user_base_url
+                    if [ -z "$user_base_url" ]; then
+                        print_warn "URL 不能为空"
+                        continue
+                    fi
+                    default_model="deepseek-chat"
+                    break
+                    ;;
+                *) print_warn "请输入 1-6"; continue ;;
+            esac
+        done
+
+        echo -e "  ${DIM}→ Base URL: $user_base_url${NC}"
         echo ""
 
         # API Key
@@ -209,8 +250,7 @@ while true; do
                 echo -e "\n${DIM}已退出安装向导${NC}"; exit 0
             fi
             if [ "$user_api_key" = "b" ]; then
-                print_dim "这已经是第一个配置步骤了"
-                continue
+                continue 2  # 回到 step 2 开头重新选 provider
             fi
             if [ -z "$user_api_key" ] || [ "$user_api_key" = "sk-your-key-here" ]; then
                 print_warn "API Key 不能为空（笔记生成必需）"
@@ -219,26 +259,12 @@ while true; do
             break
         done
 
-        # Base URL
-        echo ""
-        echo -e "  ${DIM}常用 Base URL:${NC}"
-        echo -e "  ${DIM}  aihubmix:  https://aihubmix.com/v1${NC}"
-        echo -e "  ${DIM}  OpenAI:    https://api.openai.com/v1${NC}"
-        echo -e "  ${DIM}  SiliconFlow: https://api.siliconflow.cn/v1${NC}"
-        echo ""
-        ask_input "LLM Base URL" "$user_base_url" user_base_url
-
-        if [ "$user_base_url" = "q" ]; then
-            echo -e "\n${DIM}已退出安装向导${NC}"; exit 0
-        fi
-        if [ "$user_base_url" = "b" ]; then
-            user_base_url="$current_base_url"
-            continue  # 回到 step 2 开头重新问 API Key
-        fi
-
         # Model
         echo ""
-        echo -e "  ${DIM}推荐模型: qwen3-max（便宜好用）、gpt-4o、claude-sonnet-4-20250514${NC}"
+        if [ -z "$user_model" ] || [ "$user_model" = "$current_model" ]; then
+            user_model="$default_model"
+        fi
+        echo -e "  ${DIM}推荐模型: ${default_model}${NC}"
         ask_input "LLM 模型名" "$user_model" user_model
 
         if [ "$user_model" = "q" ]; then

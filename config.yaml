@@ -36,6 +36,9 @@ llm:
   model: qwen3-max
   temperature: 0.3
 
+  # 多 Provider 配置（可选）— 详见 config.yaml.example
+  providers: {}
+
 ask:
   llm:
     enabled: true

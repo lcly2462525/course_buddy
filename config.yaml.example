@@ -44,6 +44,20 @@ llm:
   model: qwen3-max                # 推荐：性价比高
   temperature: 0.3
 
+  # ── 多 Provider 配置（可选）──
+  # 配置后可用 --model provider/model 切换，如 cb notes --model sjtu/deepseek-chat
+  # 内置 provider（无需配置即可用，只需设置对应环境变量）：
+  #   aihubmix, openai, anthropic, deepseek, siliconflow, qwen
+  # 自定义 provider 示例：
+  providers:
+    {}
+    # sjtu:
+    #   base_url: https://models.situ.edu.cn/api/v1
+    #   api_key_env: SJTU_API_KEY    # 或直接写 api_key: sk-xxx
+    # school:
+    #   base_url: https://your-school-api.edu.cn/v1
+    #   api_key: sk-your-key-here
+
 ask:
   llm:
     enabled: true
