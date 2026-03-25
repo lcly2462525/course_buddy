@@ -171,8 +171,47 @@ def get_cookies_from_browser(browser: str = "auto") -> Optional[dict]:
     return None
 
 
+def _parse_cookie_string(raw: str) -> dict:
+    """解析 Cookie 字符串为 dict，自动清理前缀和引号"""
+    raw = raw.strip().strip("'\"")
+
+    # 自动去掉常见的前缀错误
+    for prefix in ("Cookie:", "cookie:", "Cookie :", "Set-Cookie:", "set-cookie:"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):].strip()
+            rprint(f"[dim]已自动去掉 '{prefix}' 前缀[/dim]")
+            break
+
+    cookies = {}
+    for pair in raw.split(";"):
+        pair = pair.strip()
+        if "=" in pair:
+            k, _, v = pair.partition("=")
+            cookies[k.strip()] = v.strip()
+    return cookies
+
+
+def _try_clipboard_paste() -> Optional[str]:
+    """尝试从系统剪贴板读取内容（macOS pbpaste / Linux xclip）"""
+    import platform
+    cmds = {
+        "Darwin": ["pbpaste"],
+        "Linux": ["xclip", "-selection", "clipboard", "-o"],
+    }
+    cmd = cmds.get(platform.system())
+    if not cmd:
+        return None
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
 def get_cookies_via_browser_paste() -> Optional[dict]:
-    """引导用户从浏览器获取 cookies，支持多次重试"""
+    """引导用户从浏览器获取 cookies，支持剪贴板自动读取和手动粘贴"""
     rprint("\n[bold yellow]需要浏览器 cookies 来访问视频回放平台[/bold yellow]")
     rprint()
     rprint("[bold]操作步骤：[/bold]")
@@ -182,8 +221,37 @@ def get_cookies_via_browser_paste() -> Optional[dict]:
     rprint("  4. 刷新页面（Cmd+R / F5）")
     rprint("  5. 点击列表中第一个请求（通常是 [cyan]oc.sjtu.edu.cn[/cyan]）")
     rprint("  6. 在右侧找到 [bold]Request Headers（请求标头）[/bold]")
-    rprint("  7. 找到 [green]Cookie:[/green] 那一行，复制 [bold]冒号后面的全部内容[/bold]")
+    rprint("  7. 找到 [green]Cookie:[/green] 那一行，复制 [bold]冒号后面的全部内容[/bold]（Cmd+C）")
     rprint()
+
+    # ── 尝试从剪贴板自动读取 ──
+    clipboard = _try_clipboard_paste()
+    if clipboard and "=" in clipboard and ";" in clipboard:
+        rprint("[bold green]📋 检测到剪贴板中有 Cookie 内容[/bold green]")
+        preview = clipboard[:80] + ("..." if len(clipboard) > 80 else "")
+        rprint(f"  [dim]{preview}[/dim]")
+        rprint()
+        try:
+            answer = input("使用剪贴板内容？[Y/n] > ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            rprint("\n[dim]已取消[/dim]")
+            return None
+
+        if answer in ("", "y", "yes"):
+            cookies = _parse_cookie_string(clipboard)
+            if cookies:
+                rprint(f"[dim]解析到 {len(cookies)} 个 cookie，验证中...[/dim]")
+                if validate_cookies(cookies):
+                    save_cookies(cookies)
+                    rprint(f"[green]✅ Cookies 有效！已保存到 {COOKIE_FILE}[/green]")
+                    return cookies
+                else:
+                    rprint("[red]❌ 剪贴板中的 Cookies 无效（可能未登录或已过期）[/red]")
+            else:
+                rprint("[yellow]剪贴板内容无法解析为 Cookie[/yellow]")
+            rprint("[dim]将回退到手动输入...[/dim]")
+
+    # ── 手动输入（回退方案）──
     rprint("[bold]复制的内容应该长这样（不要带 Cookie: 前缀）：[/bold]")
     rprint("  [dim]_normandy_session=abc123; log_session_id=xyz789; _csrf_token=...[/dim]")
     rprint()
@@ -191,12 +259,13 @@ def get_cookies_via_browser_paste() -> Optional[dict]:
     rprint("  • [bold]不要[/bold]带 [red]Cookie:[/red] 前缀，只复制后面的值")
     rprint("  • [bold]不要[/bold]用 Console 的 document.cookie（读不到 HttpOnly cookies）")
     rprint("  • 输入 [cyan]q[/cyan] 退出，[cyan]s[/cyan] 跳过此步骤")
+    rprint("  • 如果粘贴后回车无反应，先 [bold]Cmd+C 复制 Cookie[/bold]，然后输入 [cyan]p[/cyan] 自动从剪贴板读取")
 
     max_retries = 3
     for attempt in range(max_retries):
         rprint()
         try:
-            raw = input(f"Cookie 字符串 ({attempt + 1}/{max_retries}) > ").strip()
+            raw = input(f"Cookie 字符串 ({attempt + 1}/{max_retries}, 输入 p 读剪贴板) > ").strip()
         except (EOFError, KeyboardInterrupt):
             rprint("\n[dim]已取消[/dim]")
             return None
@@ -212,23 +281,17 @@ def get_cookies_via_browser_paste() -> Optional[dict]:
             rprint("[dim]已跳过[/dim]")
             return None
 
-        # 清理输入：去掉引号
-        raw = raw.strip("'\"")
+        # 'p' / 'paste' → 从剪贴板读取
+        if raw.lower() in ("p", "paste"):
+            clip = _try_clipboard_paste()
+            if clip:
+                rprint(f"[dim]从剪贴板读取了 {len(clip)} 个字符[/dim]")
+                raw = clip
+            else:
+                rprint("[red]无法读取剪贴板（确保已复制 Cookie 到剪贴板）[/red]")
+                continue
 
-        # 自动去掉常见的前缀错误
-        for prefix in ("Cookie:", "cookie:", "Cookie :", "Set-Cookie:", "set-cookie:"):
-            if raw.startswith(prefix):
-                raw = raw[len(prefix):].strip()
-                rprint(f"[dim]已自动去掉 '{prefix}' 前缀[/dim]")
-                break
-
-        # 解析 key=value 对
-        cookies = {}
-        for pair in raw.split(";"):
-            pair = pair.strip()
-            if "=" in pair:
-                k, _, v = pair.partition("=")
-                cookies[k.strip()] = v.strip()
+        cookies = _parse_cookie_string(raw)
 
         if not cookies:
             rprint("[red]解析失败：未找到有效的 key=value 对[/red]")
