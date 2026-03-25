@@ -628,6 +628,24 @@ def cmd_init(args):
     config_path = Path(args.config).expanduser().resolve()
     config_dir = config_path.parent
 
+    # ── 旧版迁移：清理 v0.2.0 遗留的示例课程 ──
+    # v0.2.0 的 config.yaml 被 git 追踪，包含了项目作者的课程配置。
+    # 如果用户的 config.yaml 中存在这些课程但实际不属于该用户，需要清理。
+    _LEGACY_COURSE_IDS = {
+        "86789", "87081", "88817", "88821", "88884", "88892", "88918", "89538",
+    }
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as f:
+            existing_cfg = yaml.safe_load(f) or {}
+        existing_ids = set(existing_cfg.get("courses") or {})
+        if existing_ids and existing_ids <= _LEGACY_COURSE_IDS:
+            # 所有课程都是旧版遗留的（用户自己不可能恰好和作者课程完全一样）
+            console.print("[yellow]⚠ 检测到旧版本遗留的示例课程配置，正在清理...[/yellow]")
+            existing_cfg["courses"] = {}
+            with config_path.open("w", encoding="utf-8") as f:
+                yaml.dump(existing_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            console.print("[green]✅ 已清理旧版示例课程，将重新获取你的课程[/green]")
+
     # 加载 Canvas Token
     token = load_canvas_token()
     if not token:

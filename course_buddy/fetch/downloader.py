@@ -121,11 +121,17 @@ def get_cookies_via_session_token(token: str) -> Optional[dict]:
 
 
 def get_cookies_from_browser(browser: str = "auto") -> Optional[dict]:
-    """从浏览器 cookie 数据库直接读取 oc.sjtu.edu.cn 的 cookies（含 HttpOnly）"""
+    """从浏览器 cookie 数据库直接读取 oc.sjtu.edu.cn 的 cookies（含 HttpOnly）
+
+    注意：macOS 上 Chrome/Edge 需要 Keychain 访问权限，可能弹出系统授权弹窗。
+    使用超时保护避免无限阻塞。
+    """
     try:
         import browser_cookie3
     except ImportError:
         return None
+
+    import concurrent.futures
 
     browsers = []
     if browser == "auto":
@@ -133,21 +139,32 @@ def get_cookies_from_browser(browser: str = "auto") -> Optional[dict]:
     else:
         browsers = [browser]
 
+    def _try_browser(br_name: str) -> Optional[dict]:
+        loader = getattr(browser_cookie3, br_name, None)
+        if not loader:
+            return None
+        cj = loader(domain_name="oc.sjtu.edu.cn")
+        cookies = {c.name: c.value for c in cj}
+        has_session = any(
+            k in cookies
+            for k in ("_normandy_session", "_legacy_normandy_session", "log_session_id")
+        )
+        return cookies if has_session else None
+
     for br_name in browsers:
         try:
-            loader = getattr(browser_cookie3, br_name, None)
-            if not loader:
-                continue
-            cj = loader(domain_name="oc.sjtu.edu.cn")
-            cookies = {c.name: c.value for c in cj}
-            # 至少要有 session cookie 才算有效
-            has_session = any(
-                k in cookies
-                for k in ("_normandy_session", "_legacy_normandy_session", "log_session_id")
-            )
-            if has_session:
-                rprint(f"[green]✅ 从 {br_name} 读取到 {len(cookies)} 个 cookies[/green]")
-                return cookies
+            rprint(f"  [dim]尝试 {br_name}...[/dim]")
+            # 超时保护：Keychain 弹窗可能阻塞，15 秒后放弃
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_try_browser, br_name)
+                try:
+                    cookies = future.result(timeout=15)
+                    if cookies:
+                        rprint(f"[green]✅ 从 {br_name} 读取到 {len(cookies)} 个 cookies[/green]")
+                        return cookies
+                except concurrent.futures.TimeoutError:
+                    rprint(f"  [yellow]⏳ {br_name} 读取超时（可能需要在系统弹窗中点击「允许」）[/yellow]")
+                    continue
         except Exception:
             continue
 
@@ -155,51 +172,84 @@ def get_cookies_from_browser(browser: str = "auto") -> Optional[dict]:
 
 
 def get_cookies_via_browser_paste() -> Optional[dict]:
-    """引导用户从浏览器获取 cookies"""
+    """引导用户从浏览器获取 cookies，支持多次重试"""
     rprint("\n[bold yellow]需要浏览器 cookies 来访问视频回放平台[/bold yellow]")
     rprint()
-    rprint("[bold]方式 A（推荐）：从 Network 标签复制[/bold]")
+    rprint("[bold]操作步骤：[/bold]")
     rprint("  1. 在浏览器中打开并登录: [cyan]https://oc.sjtu.edu.cn[/cyan]")
-    rprint("  2. 按 F12（或 Cmd+Option+I）打开开发者工具 → [bold]Network[/bold] 标签")
-    rprint("  3. 刷新页面，点击第一个请求（oc.sjtu.edu.cn）")
-    rprint("  4. 在 Request Headers 中找到 [green]Cookie:[/green] 那一行")
-    rprint("  5. 复制 Cookie: 后面的全部内容并粘贴到下面")
+    rprint("  2. 按 F12（或 Cmd+Option+I）打开开发者工具")
+    rprint("  3. 切换到 [bold]Network（网络）[/bold] 标签")
+    rprint("  4. 刷新页面（Cmd+R / F5）")
+    rprint("  5. 点击列表中第一个请求（通常是 [cyan]oc.sjtu.edu.cn[/cyan]）")
+    rprint("  6. 在右侧找到 [bold]Request Headers（请求标头）[/bold]")
+    rprint("  7. 找到 [green]Cookie:[/green] 那一行，复制 [bold]冒号后面的全部内容[/bold]")
     rprint()
-    rprint("[bold]方式 B：从 Application 标签复制（Chrome/Edge）[/bold]")
-    rprint("  1. F12 → Application → Cookies → https://oc.sjtu.edu.cn")
-    rprint("  2. 确认包含 [green]_normandy_session[/green] cookie")
-    rprint("  3. 右键 → Copy all as cURL → 提取 Cookie header")
+    rprint("[bold]复制的内容应该长这样（不要带 Cookie: 前缀）：[/bold]")
+    rprint("  [dim]_normandy_session=abc123; log_session_id=xyz789; _csrf_token=...[/dim]")
     rprint()
-    rprint("[dim]⚠ Console 的 document.cookie 无法读取 HttpOnly cookies（如 session cookie），不要用那个方式[/dim]")
-    rprint()
+    rprint("[bold yellow]⚠ 注意：[/bold yellow]")
+    rprint("  • [bold]不要[/bold]带 [red]Cookie:[/red] 前缀，只复制后面的值")
+    rprint("  • [bold]不要[/bold]用 Console 的 document.cookie（读不到 HttpOnly cookies）")
+    rprint("  • 输入 [cyan]q[/cyan] 退出，[cyan]s[/cyan] 跳过此步骤")
 
-    try:
-        raw = input("Cookie 字符串 > ").strip().strip("'\"")
-    except (EOFError, KeyboardInterrupt):
-        return None
+    max_retries = 3
+    for attempt in range(max_retries):
+        rprint()
+        try:
+            raw = input(f"Cookie 字符串 ({attempt + 1}/{max_retries}) > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            rprint("\n[dim]已取消[/dim]")
+            return None
 
-    if not raw:
-        return None
+        if not raw:
+            rprint("[yellow]输入为空，请重试[/yellow]")
+            continue
 
-    cookies = {}
-    for pair in raw.split(";"):
-        pair = pair.strip()
-        if "=" in pair:
-            k, _, v = pair.partition("=")
-            cookies[k.strip()] = v.strip()
+        if raw.lower() in ("q", "quit", "exit"):
+            return None
 
-    if not cookies:
-        rprint("[red]解析失败，未获取到有效 cookies[/red]")
-        return None
+        if raw.lower() in ("s", "skip"):
+            rprint("[dim]已跳过[/dim]")
+            return None
 
-    # 验证
-    if validate_cookies(cookies):
-        save_cookies(cookies)
-        rprint(f"[green]✅ Cookies 有效！已保存到 {COOKIE_FILE}[/green]")
-        return cookies
-    else:
-        rprint("[red]❌ Cookies 无效（可能未登录或已过期），请重试[/red]")
-        return None
+        # 清理输入：去掉引号
+        raw = raw.strip("'\"")
+
+        # 自动去掉常见的前缀错误
+        for prefix in ("Cookie:", "cookie:", "Cookie :", "Set-Cookie:", "set-cookie:"):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):].strip()
+                rprint(f"[dim]已自动去掉 '{prefix}' 前缀[/dim]")
+                break
+
+        # 解析 key=value 对
+        cookies = {}
+        for pair in raw.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                k, _, v = pair.partition("=")
+                cookies[k.strip()] = v.strip()
+
+        if not cookies:
+            rprint("[red]解析失败：未找到有效的 key=value 对[/red]")
+            rprint("[dim]格式应为: key1=value1; key2=value2; ...[/dim]")
+            continue
+
+        rprint(f"[dim]解析到 {len(cookies)} 个 cookie，验证中...[/dim]")
+
+        # 验证
+        if validate_cookies(cookies):
+            save_cookies(cookies)
+            rprint(f"[green]✅ Cookies 有效！已保存到 {COOKIE_FILE}[/green]")
+            return cookies
+        else:
+            remaining = max_retries - attempt - 1
+            if remaining > 0:
+                rprint(f"[red]❌ Cookies 无效（可能未登录或已过期）[/red]，还可重试 {remaining} 次")
+            else:
+                rprint("[red]❌ Cookies 无效，已用完重试次数[/red]")
+
+    return None
 
 
 def ensure_cookies() -> dict:
@@ -211,7 +261,8 @@ def ensure_cookies() -> dict:
         return cookies
 
     # 2. 尝试从浏览器 cookie 数据库直接读取（含 HttpOnly）
-    rprint("[cyan]尝试从浏览器读取 cookies...[/cyan]")
+    rprint("[cyan]尝试从浏览器自动读取 cookies...[/cyan]")
+    rprint("[dim]  （如果弹出系统权限弹窗，请点击「允许」）[/dim]")
     cookies = get_cookies_from_browser()
     if cookies and validate_cookies(cookies):
         save_cookies(cookies)
