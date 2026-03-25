@@ -1,0 +1,26 @@
+# Data (large files, user-specific)
+data/
+*.mp4
+*.mkv
+*.wav
+*.mp3
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Env & secrets
+.env
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

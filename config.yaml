@@ -1,0 +1,108 @@
+# ============================================================
+# course-buddy 配置文件
+# ============================================================
+
+# Cookie 路径（v.sjtu.edu.cn LTI 认证需要 OC session cookies）
+cookies_path: ~/.config/canvas/cookies.json
+cookies_from_browser: safari
+
+# 数据根目录（相对本文件所在目录）
+root_dir: data
+
+# ============================================================
+# 课程配置（2025-2026 春学期）
+# ============================================================
+courses:
+  "86789":
+    name: 城市经济学导论
+    aliases: [城经, 城市经济学]
+    urls: [https://v.sjtu.edu.cn/course/86789]
+    note_rules:
+      key_terms: [供需, 地租, 集聚经济, 外部性, 公共品]
+
+  "87081":
+    name: 数理统计
+    aliases: [数统, 统计]
+    urls: [https://v.sjtu.edu.cn/course/87081]
+    note_rules:
+      key_terms:
+        - 极大似然
+        - 置信区间
+        - 假设检验
+        - 渐近性
+        - 充分统计量
+        - 卡方分布
+        - t分布
+        - F分布
+        - 正交变换
+
+  "88817":
+    name: 现代操作系统
+    aliases: [操作系统, 现操, OS]
+    urls: [https://v.sjtu.edu.cn/course/88817]
+    note_rules:
+      key_terms: [进程调度, 虚拟内存, 同步互斥, 文件系统, 死锁, 页表, 中断]
+
+  "88821":
+    name: 计算机系统结构（A类）
+    aliases: [系统结构, 体系结构, CA]
+    urls: [https://v.sjtu.edu.cn/course/88821]
+    note_rules:
+      key_terms: [流水线, 缓存, 指令级并行, 分支预测, 存储层次, RISC-V]
+
+  "88884":
+    name: 泛函分析
+    aliases: [泛函]
+    urls: [https://v.sjtu.edu.cn/course/88884]
+    note_rules:
+      key_terms: [Banach空间, Hilbert空间, 有界线性算子, 共鸣定理, 开映射, 闭图像, Hahn-Banach]
+
+  "88892":
+    name: 时间序列分析
+    aliases: [时间序列, 时序]
+    urls: [https://v.sjtu.edu.cn/course/88892]
+    note_rules:
+      key_terms: [ARMA, ARIMA, 自相关, 平稳性, 谱密度, Granger因果, 白噪声]
+
+  "88918":
+    name: 微分方程数值解
+    aliases: [数值微分方程, 微分数值, PDE数值]
+    urls: [https://v.sjtu.edu.cn/course/88918]
+    note_rules:
+      key_terms: [有限差分, 有限元, 收敛阶, 稳定性, Euler方法, Runge-Kutta, 刚性]
+
+  "89538":
+    name: 人工智能（B类）
+    aliases: [人工智能, AI]
+    urls: [https://v.sjtu.edu.cn/course/89538]
+    note_rules:
+      key_terms: [搜索, 约束满足, 贝叶斯网络, 强化学习, 神经网络, 决策树]
+
+# ============================================================
+# 转录设置
+# ============================================================
+transcribe:
+  backend: whisper-cpp     # whisper-cpp（推荐，本地免费）或 whisper-api
+  # whisper-cpp: 本地 whisper.cpp，M4 ~11x 实时速度，完全免费
+  # whisper-api: 调 Whisper API（aihubmix/Groq），显式传 language 参数
+  language: zh             # 默认转录语言提示（传给 Whisper）
+  target_langs: [zh, en]   # 质量检测目标语言（用于检测 hallucination）
+  clean_video: true        # 转录完成后自动删除原始视频
+  clean_audio: true        # 转录完成后自动删除临时音频
+
+# ============================================================
+# LLM 设置（笔记生成 + 自然语言解析）
+# ============================================================
+llm:
+  enabled: true
+  api_key_env: LLM_API_KEY
+  base_url: https://aihubmix.com/v1
+  model: qwen3-max
+  temperature: 0.3
+
+ask:
+  llm:
+    enabled: true
+    model: qwen3-max
+    temperature: 0
+    api_key_env: LLM_API_KEY

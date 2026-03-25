@@ -1,0 +1,61 @@
+# ============================================================
+# course-buddy 配置文件
+# ============================================================
+# 复制此文件为 config.yaml 并根据你的课程修改
+
+# Cookie 路径（自动管理，通常不需要修改）
+cookies_path: ~/.config/canvas/cookies.json
+
+# 数据根目录
+root_dir: data
+
+# ============================================================
+# 课程配置
+# ============================================================
+# 在 Canvas (oc.sjtu.edu.cn) 中查看课程 URL 获取课程 ID
+# 例如 https://oc.sjtu.edu.cn/courses/88884 → ID 为 88884
+courses:
+  "88884":
+    name: 泛函分析              # 课程名称
+    aliases: [泛函]             # 别名（用于自然语言识别）
+    urls: [https://v.sjtu.edu.cn/course/88884]
+    note_rules:
+      key_terms:                # Whisper 转录纠错关键词
+        - Banach空间
+        - Hilbert空间
+        - 有界线性算子
+
+  # 添加更多课程：
+  # "COURSE_ID":
+  #   name: 课程名
+  #   aliases: [别名1, 别名2]
+  #   urls: [https://v.sjtu.edu.cn/course/COURSE_ID]
+  #   note_rules:
+  #     key_terms: [关键词1, 关键词2]
+
+# ============================================================
+# 转录设置
+# ============================================================
+transcribe:
+  backend: whisper-cpp     # whisper-cpp（推荐）| whisper-api | summarize | local
+  language: zh             # 转录语言提示
+  target_langs: [zh, en]   # 质量检测目标语言
+  clean_video: true        # 转录后删除视频（节省磁盘）
+  clean_audio: true        # 转录后删除临时音频
+
+# ============================================================
+# LLM 设置（笔记生成）
+# ============================================================
+llm:
+  enabled: true
+  api_key_env: LLM_API_KEY        # 从 .env 读取此环境变量
+  base_url: https://aihubmix.com/v1
+  model: qwen3-max                # 推荐：性价比高
+  temperature: 0.3
+
+ask:
+  llm:
+    enabled: true
+    model: qwen3-max
+    temperature: 0
+    api_key_env: LLM_API_KEY
