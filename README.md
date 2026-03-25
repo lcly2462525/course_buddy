@@ -133,6 +133,7 @@ cb fetch --course 88884 --since 7d       # 只下载
 cb transcribe --course 88884             # 只转录
 cb notes --course 88884                  # 只生成笔记
 cb notes --course 88884 --model gpt-4o   # 用指定模型
+cb notes --course 88884 --model deepseek/deepseek-chat  # 用指定 provider
 ```
 
 ### 自然语言（需安装 `openai`）
@@ -159,11 +160,55 @@ cb clean --course 88884 --dry-run        # 只预览不删除
 - `courses` — 课程 ID、名称、别名、关键词
 - `transcribe.backend` — 转录后端（`whisper-cpp` | `whisper-api` | `summarize` | `local`）
 - `llm` — LLM API 配置（笔记生成）
+- `llm.providers` — 多 Provider 配置（可选）
 - `transcribe.clean_video` — 转录后是否自动删除视频
 
 ### .env
 
 详见 `.env.example`。必填：`LLM_API_KEY`。
+
+### LLM Provider 配置
+
+`--model` 参数支持 `provider/model` 格式，自动切换 API 地址和密钥。
+
+#### 内置 Provider
+
+以下 provider 开箱即用，只需设置对应的环境变量（在 `.env` 中添加）：
+
+| Provider | Base URL | 环境变量 | 用法示例 |
+|----------|----------|---------|---------|
+| `aihubmix` | `https://aihubmix.com/v1` | `LLM_API_KEY` | `--model aihubmix/qwen3-max` |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `--model openai/gpt-4o` |
+| `anthropic` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `--model anthropic/claude-sonnet-4-20250514` |
+| `deepseek` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `--model deepseek/deepseek-chat` |
+| `siliconflow` | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` | `--model siliconflow/Qwen/Qwen3-Max` |
+| `qwen` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `--model qwen/qwen3-max` |
+
+不带 provider 前缀时（如 `--model gpt-4o`），使用 `.env` 中配置的默认 API 地址和密钥。
+
+#### 自定义 Provider
+
+在 `config.yaml` 中添加自定义 provider（例如学校接口）：
+
+```yaml
+llm:
+  # ... 其他配置 ...
+  providers:
+    sjtu:
+      base_url: https://models.situ.edu.cn/api/v1
+      api_key: sk-your-key-here          # 直接写 key
+    lab:
+      base_url: https://your-lab-api.edu.cn/v1
+      api_key_env: LAB_API_KEY           # 或从环境变量读取
+```
+
+然后使用：
+```bash
+cb notes --course 88884 --model sjtu/deepseek-reasoner
+cb notes --course 88884 --model lab/qwen3-max
+```
+
+也可以把自定义 provider 设为默认（直接改 `config.yaml` 的 `llm.base_url`），这样不加前缀就走你的接口。
 
 ### 转录后端对比
 
@@ -195,6 +240,7 @@ course-buddy/
 │   ├── cli.py           # CLI 入口
 │   ├── config.py        # 配置加载
 │   ├── intent.py        # 自然语言解析
+│   ├── llm_providers.py # 多 LLM Provider 支持
 │   ├── fetch/
 │   │   ├── canvas_api.py   # Canvas REST API（课程列表获取）
 │   │   └── downloader.py   # Canvas LTI 认证 + 视频下载
@@ -239,6 +285,7 @@ which whisper-cli
 
 - 检查 `.env` 中 `LLM_API_KEY` 是否正确
 - 检查 API base URL 是否可访问：`curl https://aihubmix.com/v1/models`
+- **LLM API 错误 (401)** — API Key 和 Base URL 不匹配。如果你用的不是 aihubmix，需要修改 `.env` 中的 `OPENAI_BASE_URL`，或使用 `--model provider/model` 格式指定正确的 provider（详见 [LLM Provider 配置](#llm-provider-配置)）
 
 ## License
 
