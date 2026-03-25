@@ -14,6 +14,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .config import load_config
+from .fetch.canvas_api import (
+    courses_to_config,
+    filter_real_courses,
+    get_active_courses,
+    load_canvas_token,
+)
 from .fetch.downloader import download_videos
 from .intent import ACTION_LIST, parse_user_intent
 from .notes.summarizer import summarize_transcript
@@ -615,6 +621,173 @@ def cmd_clean(args):
         console.print(f"\n[green]已清理 {total_removed} 个文件, 释放 {total_size:.0f}MB[/green]")
 
 
+def cmd_init(args):
+    """从 Canvas API 自动获取课程列表并写入 config.yaml"""
+    import yaml
+
+    config_path = Path(args.config).expanduser().resolve()
+    config_dir = config_path.parent
+
+    # 加载 Canvas Token
+    token = load_canvas_token()
+    if not token:
+        console.print("[red]❌ 未找到 Canvas API Token[/red]")
+        console.print()
+        console.print("请先配置 Token：")
+        console.print("  1. 登录 [cyan]https://oc.sjtu.edu.cn[/cyan]")
+        console.print("  2. 点击左下角「设置」→「+ 新建访问许可证」")
+        console.print("  3. 复制生成的 token，然后运行：")
+        console.print("     [cyan]mkdir -p ~/.config/canvas && echo 'YOUR_TOKEN' > ~/.config/canvas/token[/cyan]")
+        sys.exit(1)
+
+    # 获取课程列表
+    console.print("[cyan]🔍 正在从 Canvas 获取课程列表...[/cyan]")
+    try:
+        all_courses = get_active_courses(token)
+    except RuntimeError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        sys.exit(1)
+
+    if not all_courses:
+        console.print("[yellow]未找到任何活跃课程。可能 Token 权限不足或当前没有选课。[/yellow]")
+        sys.exit(0)
+
+    # 过滤真实课程
+    courses = filter_real_courses(all_courses)
+    if not courses:
+        console.print(f"[yellow]获取到 {len(all_courses)} 个课程，但过滤后无有效课程。[/yellow]")
+        console.print("[dim]尝试使用 --all 显示全部课程[/dim]")
+        if getattr(args, "show_all", False):
+            courses = all_courses
+        else:
+            sys.exit(0)
+
+    # 显示课程列表
+    console.print(f"\n[bold]找到 {len(courses)} 门课程：[/bold]\n")
+    table = Table(box=box.MINIMAL_HEAVY_HEAD)
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("课程 ID")
+    table.add_column("课程名")
+    table.add_column("课程代码")
+    term_col = any(c.get("term", {}).get("name") for c in courses)
+    if term_col:
+        table.add_column("学期")
+
+    for i, c in enumerate(courses):
+        row = [
+            str(i),
+            str(c["id"]),
+            c.get("name") or "未知",
+            c.get("course_code") or "-",
+        ]
+        if term_col:
+            row.append(c.get("term", {}).get("name") or "-")
+        table.add_row(*row)
+
+    console.print(table)
+
+    # 交互式选择
+    if not getattr(args, "yes", False):
+        console.print()
+        console.print("[bold]选择要添加的课程[/bold]（输入序号，逗号分隔；直接回车 = 全部添加）：")
+        try:
+            raw = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]已取消[/dim]")
+            return
+
+        if raw:
+            try:
+                indices = [int(x.strip()) for x in raw.split(",")]
+                courses = [courses[i] for i in indices if 0 <= i < len(courses)]
+            except (ValueError, IndexError):
+                console.print("[red]无效输入[/red]")
+                sys.exit(1)
+
+    if not courses:
+        console.print("[yellow]未选择任何课程[/yellow]")
+        return
+
+    # 转为 config 格式
+    new_courses = courses_to_config(courses)
+
+    # 加载现有 config.yaml（如果存在）
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        # 从 example 创建
+        example_path = config_dir / "config.yaml.example"
+        if example_path.exists():
+            with example_path.open("r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            # 清空 example 中的示例课程
+            cfg["courses"] = {}
+        else:
+            # 从 .env 读取用户配置的 base_url
+            base_url = os.environ.get("OPENAI_BASE_URL", "https://aihubmix.com/v1")
+            cfg = {
+                "cookies_path": "~/.config/canvas/cookies.json",
+                "root_dir": "data",
+                "courses": {},
+                "transcribe": {
+                    "backend": "whisper-cpp",
+                    "language": "zh",
+                    "target_langs": ["zh", "en"],
+                    "clean_video": True,
+                    "clean_audio": True,
+                },
+                "llm": {
+                    "enabled": True,
+                    "api_key_env": "LLM_API_KEY",
+                    "base_url": base_url,
+                    "model": "qwen3-max",
+                    "temperature": 0.3,
+                },
+                "ask": {
+                    "llm": {
+                        "enabled": True,
+                        "model": "qwen3-max",
+                        "temperature": 0,
+                        "api_key_env": "LLM_API_KEY",
+                    }
+                },
+            }
+
+    existing_courses = cfg.get("courses") or {}
+
+    # 合并课程：新课程不覆盖已有配置（保留用户自定义的 aliases/note_rules）
+    added = []
+    skipped = []
+    for cid, meta in new_courses.items():
+        if cid in existing_courses:
+            skipped.append((cid, meta["name"]))
+        else:
+            existing_courses[cid] = meta
+            added.append((cid, meta["name"]))
+
+    cfg["courses"] = existing_courses
+
+    # 写入 config.yaml
+    with config_path.open("w", encoding="utf-8") as f:
+        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    # 结果
+    console.print()
+    if added:
+        console.print(f"[green]✅ 已添加 {len(added)} 门课程：[/green]")
+        for cid, name in added:
+            console.print(f"  [green]+[/green] {cid}: {name}")
+    if skipped:
+        console.print(f"[yellow]⏭  跳过 {len(skipped)} 门已存在的课程：[/yellow]")
+        for cid, name in skipped:
+            console.print(f"  [dim]-[/dim] {cid}: {name}")
+
+    console.print(f"\n[bold]配置已写入 {config_path}[/bold]")
+    console.print()
+    console.print("[dim]提示：你可以编辑 config.yaml 添加课程别名（aliases）和关键词（key_terms）来提升体验[/dim]")
+
+
 def cmd_ask(args):
     cfg = load_config(args.config)
     text = " ".join(args.text).strip()
@@ -709,6 +882,11 @@ def build_parser():
     p.add_argument("--what", choices=["video", "audio", "all"], default="all", help="清理什么")
     p.add_argument("--dry-run", action="store_true", help="只显示不删除")
     p.set_defaults(handler=cmd_clean)
+
+    p = sub.add_parser("init", help="从 Canvas 自动获取课程并写入配置", parents=[common])
+    p.add_argument("--yes", "-y", action="store_true", help="跳过交互确认，直接添加所有课程")
+    p.add_argument("--all", dest="show_all", action="store_true", help="显示所有课程（含非正式课程）")
+    p.set_defaults(handler=cmd_init)
 
     p = sub.add_parser("ask", help="自然语言控制", parents=[common])
     p.add_argument("--lang", default="zh")

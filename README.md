@@ -12,13 +12,29 @@ SJTU 课程回放 → 转录 → 笔记，一条龙自动化。
 
 ```bash
 git clone <repo-url> course-buddy && cd course-buddy
-bash setup.sh          # 一键安装（venv + 依赖 + whisper 模型）
-vim .env               # 填入 LLM API key
-cp config.yaml.example config.yaml
-vim config.yaml        # 添加你的课程
+bash setup.sh          # 交互式安装向导（一路跟着走就行）
+```
 
+安装向导会依次引导你：
+1. ⚙️ 自动安装依赖（Python venv、Homebrew 包、whisper 模型）
+2. 🔑 输入 LLM API Key 和 Base URL（笔记生成用）
+3. 🎓 输入 Canvas Token（自动验证有效性）
+4. 📚 自动从 Canvas 获取你的课程列表
+
+全程交互式问答，**不需要手动编辑任何配置文件**。每一步都可以输入 `b` 返回上一步。
+
+安装完成后：
+```bash
 source .venv/bin/activate
-cb all --course 88884  # 一条龙处理
+cb list                # 查看已自动配置的课程
+cb all --course <ID>   # 一条龙处理
+```
+
+如果你之后需要刷新课程列表（比如新学期选课后），运行：
+
+```bash
+cb init                # 重新获取课程，已有课程不会被覆盖
+cb init --yes          # 跳过确认，直接添加所有新课程
 ```
 
 ## 系统要求
@@ -41,13 +57,13 @@ cb all --course 88884  # 一条龙处理
 
 ## 安装
 
-### 方式 A：一键脚本（推荐）
+### 方式 A：交互式向导（推荐）
 
 ```bash
 bash setup.sh
 ```
 
-脚本会自动安装：Python venv、pip 依赖、Homebrew 包（aria2, ffmpeg, whisper-cpp）、whisper 模型。
+向导会自动处理所有依赖安装，并引导你输入 API Key、Base URL 和 Canvas Token。
 
 ### 方式 B：手动安装
 
@@ -59,22 +75,26 @@ brew install ffmpeg whisper-cpp aria2
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-# 可选：NLP 功能（自然语言命令解析）
-pip install -e ".[nlp]"
-
 # 3. whisper 模型
 mkdir -p ~/.local/share/whisper-cpp
 curl -L -o ~/.local/share/whisper-cpp/ggml-large-v3-turbo.bin \
   https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
 
-# 4. 配置
-cp .env.example .env && vim .env
-cp config.yaml.example config.yaml && vim config.yaml
+# 4. 配置 .env
+cp .env.example .env
+# 编辑 .env，填入 LLM_API_KEY 和 OPENAI_BASE_URL
+
+# 5. Canvas Token
+mkdir -p ~/.config/canvas
+echo 'YOUR_TOKEN' > ~/.config/canvas/token
+
+# 6. 自动获取课程
+cb init
 ```
 
 ### Canvas API Token
 
-笔记生成需要访问课程视频，需要 Canvas API Token：
+安装向导会引导你输入 Token。如需手动获取：
 
 1. 登录 [oc.sjtu.edu.cn](https://oc.sjtu.edu.cn)
 2. 左下角「设置」→「+ 新建访问许可证」
@@ -89,6 +109,8 @@ cp config.yaml.example config.yaml && vim config.yaml
 ### 基本命令
 
 ```bash
+cb init                           # 从 Canvas 自动获取课程配置
+cb init --yes                     # 跳过交互确认
 cb list                           # 查看已配课程
 cb list-videos --course 88884     # 查看视频列表
 cb list-videos --course 88884 --since 7d   # 仅查看最近 7 天视频
@@ -174,6 +196,7 @@ course-buddy/
 │   ├── config.py        # 配置加载
 │   ├── intent.py        # 自然语言解析
 │   ├── fetch/
+│   │   ├── canvas_api.py   # Canvas REST API（课程列表获取）
 │   │   └── downloader.py   # Canvas LTI 认证 + 视频下载
 │   ├── transcribe/
 │   │   └── asr.py          # 转录引擎（4 种后端）

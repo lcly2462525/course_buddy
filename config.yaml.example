@@ -1,7 +1,8 @@
 # ============================================================
 # course-buddy 配置文件
 # ============================================================
-# 复制此文件为 config.yaml 并根据你的课程修改
+# 此文件由 `bash setup.sh` 或 `cb init` 自动生成
+# 也可手动复制此模板为 config.yaml 后修改
 
 # Cookie 路径（自动管理，通常不需要修改）
 cookies_path: ~/.config/canvas/cookies.json
@@ -12,32 +13,22 @@ root_dir: data
 # ============================================================
 # 课程配置
 # ============================================================
-# 在 Canvas (oc.sjtu.edu.cn) 中查看课程 URL 获取课程 ID
+# 运行 `cb init` 自动从 Canvas 获取你的课程
+# 也可手动添加：在 Canvas (oc.sjtu.edu.cn) 查看课程 URL 获取 ID
 # 例如 https://oc.sjtu.edu.cn/courses/88884 → ID 为 88884
-courses:
-  "88884":
-    name: 泛函分析              # 课程名称
-    aliases: [泛函]             # 别名（用于自然语言识别）
-    urls: [https://v.sjtu.edu.cn/course/88884]
-    note_rules:
-      key_terms:                # Whisper 转录纠错关键词
-        - Banach空间
-        - Hilbert空间
-        - 有界线性算子
-
-  # 添加更多课程：
+courses: {}
   # "COURSE_ID":
-  #   name: 课程名
-  #   aliases: [别名1, 别名2]
+  #   name: 课程名称
+  #   aliases: [别名1, 别名2]       # 用于自然语言识别
   #   urls: [https://v.sjtu.edu.cn/course/COURSE_ID]
   #   note_rules:
-  #     key_terms: [关键词1, 关键词2]
+  #     key_terms: [关键词1, 关键词2]  # Whisper 转录纠错
 
 # ============================================================
 # 转录设置
 # ============================================================
 transcribe:
-  backend: whisper-cpp     # whisper-cpp（推荐）| whisper-api | summarize | local
+  backend: whisper-cpp     # whisper-cpp（推荐）| whisper-api
   language: zh             # 转录语言提示
   target_langs: [zh, en]   # 质量检测目标语言
   clean_video: true        # 转录后删除视频（节省磁盘）
