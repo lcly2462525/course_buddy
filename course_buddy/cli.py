@@ -108,6 +108,190 @@ def _parse_since_date(since: str | None) -> str | None:
         return None
 
 
+def _load_raw_config(config_path: Path):
+    import yaml
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return None
+
+
+def _default_config_dict() -> dict:
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://aihubmix.com/v1")
+    return {
+        "cookies_path": "~/.config/canvas/cookies.json",
+        "root_dir": "data",
+        "courses": {},
+        "transcribe": {
+            "backend": "whisper-cpp",
+            "language": "zh",
+            "target_langs": ["zh", "en"],
+            "clean_video": True,
+            "clean_audio": True,
+        },
+        "llm": {
+            "enabled": True,
+            "api_key_env": "LLM_API_KEY",
+            "base_url": base_url,
+            "model": "qwen3-max",
+            "temperature": 0.3,
+        },
+        "ask": {
+            "llm": {
+                "enabled": True,
+                "model": "qwen3-max",
+                "temperature": 0,
+                "api_key_env": "LLM_API_KEY",
+            }
+        },
+    }
+
+
+def _load_or_init_config(config_path: Path, config_dir: Path) -> dict:
+    cfg = _load_raw_config(config_path)
+    if cfg is not None:
+        return cfg
+
+    example_path = config_dir / "config.yaml.example"
+    if example_path.exists():
+        import yaml
+
+        with example_path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        cfg["courses"] = {}
+        return cfg
+
+    return _default_config_dict()
+
+
+def _merge_course_meta(existing: dict, fresh: dict) -> dict:
+    merged = dict(fresh)
+    if existing.get("aliases") is not None:
+        merged["aliases"] = existing.get("aliases") or []
+    if existing.get("urls"):
+        merged["urls"] = existing["urls"]
+    if existing.get("note_rules") is not None:
+        merged["note_rules"] = existing.get("note_rules") or {}
+    return merged
+
+
+def _merge_added_courses(existing_courses: dict, new_courses: dict) -> tuple[dict, list, list]:
+    result = dict(existing_courses)
+    added = []
+    skipped = []
+    for cid, meta in new_courses.items():
+        if cid in result:
+            skipped.append((cid, meta["name"]))
+        else:
+            result[cid] = meta
+            added.append((cid, meta["name"]))
+    return result, added, skipped
+
+
+def _refresh_courses(existing_courses: dict, new_courses: dict) -> tuple[dict, list, list, list]:
+    refreshed = {}
+    added = []
+    updated = []
+    removed = []
+
+    for cid, meta in new_courses.items():
+        if cid in existing_courses:
+            refreshed[cid] = _merge_course_meta(existing_courses[cid], meta)
+            updated.append((cid, refreshed[cid]["name"]))
+        else:
+            refreshed[cid] = meta
+            added.append((cid, meta["name"]))
+
+    for cid, meta in existing_courses.items():
+        if cid not in refreshed:
+            removed.append((cid, meta.get("name", cid)))
+
+    return refreshed, added, updated, removed
+
+
+def _print_course_table(courses: List[dict], *, with_index: bool):
+    table = Table(box=box.MINIMAL_HEAVY_HEAD)
+    if with_index:
+        table.add_column("#", justify="right", style="dim")
+    table.add_column("课程 ID")
+    table.add_column("课程名")
+    table.add_column("课程代码")
+    term_col = any(c.get("term", {}).get("name") for c in courses)
+    if term_col:
+        table.add_column("学期")
+
+    for i, c in enumerate(courses):
+        row = []
+        if with_index:
+            row.append(str(i))
+        row.extend([
+            str(c["id"]),
+            c.get("name") or "未知",
+            c.get("course_code") or "-",
+        ])
+        if term_col:
+            row.append(c.get("term", {}).get("name") or "-")
+        table.add_row(*row)
+
+    console.print(table)
+
+
+def _fetch_canvas_courses(show_all: bool = False) -> List[dict]:
+    token = load_canvas_token()
+    if not token:
+        console.print("[red]❌ 未找到 Canvas API Token[/red]")
+        console.print()
+        console.print("请先配置 Token：")
+        console.print("  1. 登录 [cyan]https://oc.sjtu.edu.cn[/cyan]")
+        console.print("  2. 点击左下角「设置」→「+ 新建访问许可证」")
+        console.print("  3. 复制生成的 token，然后运行：")
+        console.print("     [cyan]mkdir -p ~/.config/canvas && echo 'YOUR_TOKEN' > ~/.config/canvas/token[/cyan]")
+        sys.exit(1)
+
+    console.print("[cyan]🔍 正在从 Canvas 获取课程列表...[/cyan]")
+    try:
+        all_courses = get_active_courses(token)
+    except RuntimeError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        sys.exit(1)
+
+    if not all_courses:
+        console.print("[yellow]未找到任何活跃课程。可能 Token 权限不足或当前没有选课。[/yellow]")
+        sys.exit(0)
+
+    courses = filter_real_courses(all_courses)
+    if not courses:
+        console.print(f"[yellow]获取到 {len(all_courses)} 个课程，但过滤后无有效课程。[/yellow]")
+        console.print("[dim]尝试使用 --all 显示全部课程[/dim]")
+        if show_all:
+            courses = all_courses
+        else:
+            sys.exit(0)
+
+    return courses
+
+
+def _migrate_legacy_courses_if_needed(config_path: Path):
+    import yaml
+
+    _LEGACY_COURSE_IDS = {
+        "86789", "87081", "88817", "88821", "88884", "88892", "88918", "89538",
+    }
+    if not config_path.exists():
+        return
+
+    with config_path.open("r", encoding="utf-8") as f:
+        existing_cfg = yaml.safe_load(f) or {}
+    existing_ids = set(existing_cfg.get("courses") or {})
+    if existing_ids and existing_ids <= _LEGACY_COURSE_IDS:
+        console.print("[yellow]⚠ 检测到旧版本遗留的示例课程配置，正在清理...[/yellow]")
+        existing_cfg["courses"] = {}
+        with config_path.open("w", encoding="utf-8") as f:
+            yaml.dump(existing_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        console.print("[green]✅ 已清理旧版示例课程，将重新获取你的课程[/green]")
+
+
 # ============================================================
 # 进度跟踪
 # ============================================================
@@ -229,6 +413,11 @@ def cmd_list(args):
         aliases = ", ".join(meta.get("aliases", []))
         table.add_row(cid, meta.get("name", ""), aliases)
     console.print(table)
+    if cfg.get("_courses_inferred"):
+        console.print(
+            "[yellow]检测到 config.yaml 中课程为空，已从本地 data 目录临时恢复课程。"
+            "建议运行 `cb init` 重新写回配置，课程别名也会一起恢复。[/yellow]"
+        )
 
 
 def cmd_list_videos(args):
@@ -627,82 +816,12 @@ def cmd_init(args):
 
     config_path = Path(args.config).expanduser().resolve()
     config_dir = config_path.parent
-
-    # ── 旧版迁移：清理 v0.2.0 遗留的示例课程 ──
-    # v0.2.0 的 config.yaml 被 git 追踪，包含了项目作者的课程配置。
-    # 如果用户的 config.yaml 中存在这些课程但实际不属于该用户，需要清理。
-    _LEGACY_COURSE_IDS = {
-        "86789", "87081", "88817", "88821", "88884", "88892", "88918", "89538",
-    }
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as f:
-            existing_cfg = yaml.safe_load(f) or {}
-        existing_ids = set(existing_cfg.get("courses") or {})
-        if existing_ids and existing_ids <= _LEGACY_COURSE_IDS:
-            # 所有课程都是旧版遗留的（用户自己不可能恰好和作者课程完全一样）
-            console.print("[yellow]⚠ 检测到旧版本遗留的示例课程配置，正在清理...[/yellow]")
-            existing_cfg["courses"] = {}
-            with config_path.open("w", encoding="utf-8") as f:
-                yaml.dump(existing_cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-            console.print("[green]✅ 已清理旧版示例课程，将重新获取你的课程[/green]")
-
-    # 加载 Canvas Token
-    token = load_canvas_token()
-    if not token:
-        console.print("[red]❌ 未找到 Canvas API Token[/red]")
-        console.print()
-        console.print("请先配置 Token：")
-        console.print("  1. 登录 [cyan]https://oc.sjtu.edu.cn[/cyan]")
-        console.print("  2. 点击左下角「设置」→「+ 新建访问许可证」")
-        console.print("  3. 复制生成的 token，然后运行：")
-        console.print("     [cyan]mkdir -p ~/.config/canvas && echo 'YOUR_TOKEN' > ~/.config/canvas/token[/cyan]")
-        sys.exit(1)
-
-    # 获取课程列表
-    console.print("[cyan]🔍 正在从 Canvas 获取课程列表...[/cyan]")
-    try:
-        all_courses = get_active_courses(token)
-    except RuntimeError as e:
-        console.print(f"[red]❌ {e}[/red]")
-        sys.exit(1)
-
-    if not all_courses:
-        console.print("[yellow]未找到任何活跃课程。可能 Token 权限不足或当前没有选课。[/yellow]")
-        sys.exit(0)
-
-    # 过滤真实课程
-    courses = filter_real_courses(all_courses)
-    if not courses:
-        console.print(f"[yellow]获取到 {len(all_courses)} 个课程，但过滤后无有效课程。[/yellow]")
-        console.print("[dim]尝试使用 --all 显示全部课程[/dim]")
-        if getattr(args, "show_all", False):
-            courses = all_courses
-        else:
-            sys.exit(0)
+    _migrate_legacy_courses_if_needed(config_path)
+    courses = _fetch_canvas_courses(show_all=getattr(args, "show_all", False))
 
     # 显示课程列表
     console.print(f"\n[bold]找到 {len(courses)} 门课程：[/bold]\n")
-    table = Table(box=box.MINIMAL_HEAVY_HEAD)
-    table.add_column("#", justify="right", style="dim")
-    table.add_column("课程 ID")
-    table.add_column("课程名")
-    table.add_column("课程代码")
-    term_col = any(c.get("term", {}).get("name") for c in courses)
-    if term_col:
-        table.add_column("学期")
-
-    for i, c in enumerate(courses):
-        row = [
-            str(i),
-            str(c["id"]),
-            c.get("name") or "未知",
-            c.get("course_code") or "-",
-        ]
-        if term_col:
-            row.append(c.get("term", {}).get("name") or "-")
-        table.add_row(*row)
-
-    console.print(table)
+    _print_course_table(courses, with_index=True)
 
     # 交互式选择
     if not getattr(args, "yes", False):
@@ -728,63 +847,9 @@ def cmd_init(args):
 
     # 转为 config 格式
     new_courses = courses_to_config(courses)
-
-    # 加载现有 config.yaml（如果存在）
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-    else:
-        # 从 example 创建
-        example_path = config_dir / "config.yaml.example"
-        if example_path.exists():
-            with example_path.open("r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
-            # 清空 example 中的示例课程
-            cfg["courses"] = {}
-        else:
-            # 从 .env 读取用户配置的 base_url
-            base_url = os.environ.get("OPENAI_BASE_URL", "https://aihubmix.com/v1")
-            cfg = {
-                "cookies_path": "~/.config/canvas/cookies.json",
-                "root_dir": "data",
-                "courses": {},
-                "transcribe": {
-                    "backend": "whisper-cpp",
-                    "language": "zh",
-                    "target_langs": ["zh", "en"],
-                    "clean_video": True,
-                    "clean_audio": True,
-                },
-                "llm": {
-                    "enabled": True,
-                    "api_key_env": "LLM_API_KEY",
-                    "base_url": base_url,
-                    "model": "qwen3-max",
-                    "temperature": 0.3,
-                },
-                "ask": {
-                    "llm": {
-                        "enabled": True,
-                        "model": "qwen3-max",
-                        "temperature": 0,
-                        "api_key_env": "LLM_API_KEY",
-                    }
-                },
-            }
-
+    cfg = _load_or_init_config(config_path, config_dir)
     existing_courses = cfg.get("courses") or {}
-
-    # 合并课程：新课程不覆盖已有配置（保留用户自定义的 aliases/note_rules）
-    added = []
-    skipped = []
-    for cid, meta in new_courses.items():
-        if cid in existing_courses:
-            skipped.append((cid, meta["name"]))
-        else:
-            existing_courses[cid] = meta
-            added.append((cid, meta["name"]))
-
-    cfg["courses"] = existing_courses
+    cfg["courses"], added, skipped = _merge_added_courses(existing_courses, new_courses)
 
     # 写入 config.yaml
     with config_path.open("w", encoding="utf-8") as f:
@@ -804,6 +869,46 @@ def cmd_init(args):
     console.print(f"\n[bold]配置已写入 {config_path}[/bold]")
     console.print()
     console.print("[dim]提示：你可以编辑 config.yaml 添加课程别名（aliases）和关键词（key_terms）来提升体验[/dim]")
+
+
+def cmd_refresh(args):
+    """从 Canvas 同步本学期全部课程到 config.yaml"""
+    import yaml
+
+    config_path = Path(args.config).expanduser().resolve()
+    config_dir = config_path.parent
+
+    _migrate_legacy_courses_if_needed(config_path)
+    courses = _fetch_canvas_courses(show_all=getattr(args, "show_all", False))
+
+    console.print(f"\n[bold]本次将同步 {len(courses)} 门当前活跃课程：[/bold]\n")
+    _print_course_table(courses, with_index=False)
+
+    cfg = _load_or_init_config(config_path, config_dir)
+    existing_courses = cfg.get("courses") or {}
+    new_courses = courses_to_config(courses)
+    cfg["courses"], added, updated, removed = _refresh_courses(existing_courses, new_courses)
+
+    with config_path.open("w", encoding="utf-8") as f:
+        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    console.print()
+    console.print(f"[green]✅ 已同步 {len(cfg['courses'])} 门课程[/green]")
+    if added:
+        console.print(f"[green]新增 {len(added)} 门：[/green]")
+        for cid, name in added:
+            console.print(f"  [green]+[/green] {cid}: {name}")
+    if updated:
+        console.print(f"[cyan]保留并更新 {len(updated)} 门：[/cyan]")
+        for cid, name in updated:
+            console.print(f"  [cyan]~[/cyan] {cid}: {name}")
+    if removed:
+        console.print(f"[yellow]移除 {len(removed)} 门非本学期课程：[/yellow]")
+        for cid, name in removed:
+            console.print(f"  [yellow]-[/yellow] {cid}: {name}")
+
+    console.print(f"\n[bold]配置已写入 {config_path}[/bold]")
+    console.print("[dim]refresh 会以 Canvas 当前活跃课程为准，并尽量保留 aliases、urls、note_rules。[/dim]")
 
 
 def cmd_ask(args):
@@ -905,6 +1010,10 @@ def build_parser():
     p.add_argument("--yes", "-y", action="store_true", help="跳过交互确认，直接添加所有课程")
     p.add_argument("--all", dest="show_all", action="store_true", help="显示所有课程（含非正式课程）")
     p.set_defaults(handler=cmd_init)
+
+    p = sub.add_parser("refresh", help="同步本学期全部课程到配置", parents=[common])
+    p.add_argument("--all", dest="show_all", action="store_true", help="同步所有活跃课程（含非正式课程）")
+    p.set_defaults(handler=cmd_refresh)
 
     p = sub.add_parser("ask", help="自然语言控制", parents=[common])
     p.add_argument("--lang", default="zh")

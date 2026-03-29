@@ -23,6 +23,12 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.mode, "ask")
         self.assertEqual(" ".join(args.text), "帮我整理 现代操作系统 最近两周的笔记")
 
+    def test_refresh_arguments_parse_normally(self):
+        parser = build_parser()
+        args = parser.parse_args(["refresh", "--config", "foo.yaml"])
+        self.assertEqual(args.mode, "refresh")
+        self.assertEqual(args.config, "foo.yaml")
+
 
 if __name__ == "__main__":
     unittest.main()

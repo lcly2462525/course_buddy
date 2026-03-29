@@ -389,7 +389,7 @@ EOF
         # ============================================================
         print_step 4 "自动获取课程列表"
 
-        # 生成 config.yaml（如果不存在）
+        # 生成用户自己的 config.yaml（如果不存在）
         if [ ! -f "config.yaml" ]; then
             # 从 example 复制，替换 LLM 配置
             python3 -c "
@@ -406,7 +406,7 @@ cfg.get('ask', {}).get('llm', {})['model'] = '$user_model'
 with open('config.yaml', 'w') as f:
     yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 "
-            print_ok "config.yaml 已创建"
+            print_ok "已基于 config.yaml.example 创建本地 config.yaml"
         fi
 
         echo ""
@@ -506,5 +506,5 @@ echo "    cb list-videos --course <ID>    # 查看视频列表"
 echo "    cb all --course <ID>            # 一条龙：下载→转录→笔记"
 echo ""
 echo -e "  ${DIM}如需重新配置: bash setup.sh${NC}"
-echo -e "  ${DIM}如需刷新课程: cb init${NC}"
+echo -e "  ${DIM}如需刷新课程: cb refresh${NC}"
 echo ""

@@ -35,6 +35,7 @@ cb all --course <ID>   # 一条龙处理
 ```bash
 cb init                # 重新获取课程，已有课程不会被覆盖
 cb init --yes          # 跳过确认，直接添加所有新课程
+cb refresh             # 用 Canvas 当前活跃课程覆盖同步本学期课表
 ```
 
 ## 系统要求
@@ -111,6 +112,7 @@ cb init
 ```bash
 cb init                           # 从 Canvas 自动获取课程配置
 cb init --yes                     # 跳过交互确认
+cb refresh                        # 同步本学期全部课程到 config.yaml
 cb list                           # 查看已配课程
 cb list-videos --course 88884     # 查看视频列表
 cb list-videos --course 88884 --since 7d   # 仅查看最近 7 天视频
@@ -155,7 +157,8 @@ cb clean --course 88884 --dry-run        # 只预览不删除
 
 ### config.yaml
 
-详见 `config.yaml.example`。核心配置项：
+首次安装时会从 `config.yaml.example` 生成你本地的 `config.yaml`。
+仓库只跟踪模板，不会跟踪你的真实课程配置。核心配置项：
 
 - `courses` — 课程 ID、名称、别名、关键词
 - `transcribe.backend` — 转录后端（`whisper-cpp` | `whisper-api` | `summarize` | `local`）
@@ -233,7 +236,7 @@ cb notes --course 88884 --model lab/qwen3-max
 
 ```
 course-buddy/
-├── config.yaml          # 你的配置（git-ignored）
+├── config.yaml          # 你的本地配置（git-ignored，首次运行后生成）
 ├── .env                 # API keys（git-ignored）
 ├── setup.sh             # 一键安装脚本
 ├── course_buddy/
@@ -277,7 +280,7 @@ which whisper-cli
 ### 转录出现乱码（hallucination）
 
 程序内置了 hallucination 过滤器（外语检测、重复检测）。如果仍有问题：
-- 确认 `config.yaml` 中 `transcribe.language` 设置正确
+- 确认本地 `config.yaml` 中 `transcribe.language` 设置正确
 - 确认 `transcribe.target_langs` 包含课程实际语言
 - 尝试换用 `whisper-api` 后端对比
 
